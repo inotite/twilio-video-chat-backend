@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: joinaroom-service
+spec:
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: http
+  selector:
+    app: joinaroom
+  type: LoadBalancer

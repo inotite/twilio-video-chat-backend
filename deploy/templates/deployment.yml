@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joinaroom-deployment
+spec:
+  selector:
+    matchLabels:
+      app: joinaroom
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: joinaroom
+    spec:
+      containers:
+        - name: joinaroom
+          image: __CONTAINER_IMAGE_BUILT_API__
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            periodSeconds: 15
+            timeoutSeconds: 2
+            successThreshold: 2
+            failureThreshold: 2
+            httpGet:
+              path: /
+              port: 3000
+          env:
+            - name: JOINAROOM_DB_HOST
+              value: joinaroom-mysql
+            - name: JOINAROOM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-root-password
+            - name: JOINAROOM_DB
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-database
+            - name: JOINAROOM_MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-user
+            - name: JOINAROOM_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-password
+      imagePullSecrets:
+        - name: __K8S_SECRET_NAME__

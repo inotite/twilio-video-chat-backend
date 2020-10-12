@@ -1,0 +1,110 @@
+#   Copyright: Samuel Mbugua <developer.njane@gmail.com>
+
+stages:
+  - build
+  - test
+  - staging
+  - production
+
+variables:
+  CONTAINER_IMAGE_LATEST: ${CI_REGISTRY_IMAGE}:latest
+  DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://docker:2375/  # required since we use dind
+
+  K8S_SECRET_NAME: ${CI_PROJECT_NAME}-${CI_PROJECT_ID}
+  RELEASE_NAME: ${CI_PROJECT_NAME}-${CI_PROJECT_ID}
+
+  KUBERNETES_VERSION: 1.14.10
+  CONTAINER_IMAGE_BUILT_API: ${CI_REGISTRY_IMAGE}:api_${CI_COMMIT_REF_SLUG}_${CI_COMMIT_SHA}
+
+  CONTAINER_IMAGE_CACHE_API: ${CI_REGISTRY_IMAGE}:api_${CI_COMMIT_REF_SLUG}_${CI_COMMIT_SHA}_cache
+
+.build:
+  stage: build
+  image: docker:stable-git
+  services:
+    - docker:dind
+
+build:api:
+  extends: .build
+  script:
+    - build_api
+
+# run tests against built image
+.test:
+  stage: test
+  script:
+    - exit 0
+
+staging:
+  image: google/cloud-sdk
+  stage: staging
+  script:
+    - create_secret
+    - deploy
+  environment:
+    name: staging
+    url: http://$DOMAIN_NAME
+  only:
+    refs:
+      - staging
+    kubernetes: active
+  variables:
+    DEPLOY_NAMESPACE: $KUBE_NAMESPACE
+    DOMAIN_NAME: dev.joinaroom.live
+
+production:
+  image: google/cloud-sdk
+  stage: production
+  script:
+    - create_secret
+    - deploy
+  environment:
+    name: production
+    url: http://$DOMAIN_NAME
+  only:
+    refs:
+      - master
+    kubernetes: active
+  variables:
+    DEPLOY_NAMESPACE: $KUBE_NAMESPACE
+    DOMAIN_NAME: api.joinaroom.live
+
+# ---------------------------------------------------------------------------
+
+.auto_devops: &auto_devops |
+
+  set -u
+
+  function build_api {
+    echo "Building Dockerfile-based application..."
+    docker login -u ${CI_DEPLOY_USER} -p ${CI_DEPLOY_PASSWORD} ${CI_REGISTRY}
+    docker pull ${CONTAINER_IMAGE_CACHE_API} || true
+    docker build --cache-from ${CONTAINER_IMAGE_CACHE_API} -t ${CONTAINER_IMAGE_BUILT_API} -t ${CONTAINER_IMAGE_CACHE_API} .
+    echo "Pushing to the Container Registry..."
+    docker push ${CONTAINER_IMAGE_BUILT_API}
+    docker push ${CONTAINER_IMAGE_CACHE_API}
+  }
+
+
+  function ensure_namespace() {
+    kubectl describe namespace "$DEPLOY_NAMESPACE" || kubectl create namespace "$DEPLOY_NAMESPACE"
+  }
+
+  function create_secret(){
+    echo "Create secret... "
+    kubectl delete secret "${K8S_SECRET_NAME}" --ignore-not-found -n "${DEPLOY_NAMESPACE}"
+    kubectl create secret docker-registry "${K8S_SECRET_NAME}" --docker-server=${CI_REGISTRY} --docker-username=${CI_DEPLOY_USER} --docker-password=${CI_DEPLOY_PASSWORD} --docker-email=${GITLAB_USER_EMAIL} -n "${DEPLOY_NAMESPACE}"
+  }
+
+  function deploy() {
+    printenv
+    kubectl config set-cluster joinaroomlive-cluster --server=$KUBE_URL --insecure-skip-tls-verify=true
+    kubectl config set-credentials admin --token=$KUBE_TOKEN
+    kubectl config set-context ${DEPLOY_NAMESPACE} --cluster=joinaroomlive-cluster --user=admin
+    kubectl config use-context ${DEPLOY_NAMESPACE}
+    /bin/sh deploy/deploy.sh $CONTAINER_IMAGE_BUILT_API $K8S_SECRET_NAME $DOMAIN_NAME $DEPLOY_NAMESPACE
+  }
+
+before_script:
+  - *auto_devops

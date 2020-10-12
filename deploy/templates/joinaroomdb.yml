@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-pass
+type: Opaque
+data:
+  mysql-password: am9pbmFyb29tQDEyMw==
+  mysql-root-password: cm9vdA==
+  mysql-user: am9pbmFyb29t
+  mysql-database: am9pbl9hX3Jvb20=
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: joinaroom-mysql
+  labels:
+    app: joinaroom
+spec:
+  ports:
+    - port: 3306
+      targetPort: 3306
+  selector:
+    app: joinaroom
+    tier: mysql
+  type: NodePort
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim
+  labels:
+    app: joinaroom
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: joinaroom-mysql
+  labels:
+    app: joinaroom
+spec:
+  selector:
+    matchLabels:
+      app: joinaroom
+      tier: mysql
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: joinaroom
+        tier: mysql
+    spec:
+      containers:
+        - image: mysql:5.7
+          name: mysql
+          args:
+            - "--ignore-db-dir=lost+found"
+            - "--explicit_defaults_for_timestamp=1"
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-database
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-pass
+                  key: mysql-password
+          ports:
+            - containerPort: 3306
+              name: mysql
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: mysql-pv-claim
